@@ -5,6 +5,8 @@ use JSON::Fast :ALL;
 use Log::Async;
 
 
+our %session;
+
 class Login is export {
   has Str $.session;
   has Str $.username;
@@ -120,13 +122,15 @@ sub login(%server) is export {
     my %room-response = jget("https://$domain/_matrix/client/r0/joined_rooms?access_token=$token");
     my @joined = %room-response<joined_rooms>;
     %server<rooms> = @joined;
+    my %profile-response = jget("https://$domain/_matrix/client/r0/profile/\@%server<username>:$domain?access_token=$token");
+    %server<display-name> = %profile-response<displayname>;
 
-    $session-supplier.emit(%server);
+    %session = %server;
 
     return %server;
 }
 
-sub sync(%session) is export {
+sub sync() is export {
     my $domain = %session<address>;
     if %session<deviceid>:exists {
         %session<device_id> = %session<deviceid>;
@@ -160,21 +164,29 @@ sub sync(%session) is export {
 
     if $response.room-invites {
       for $response.room-invites -> $invite {
-        join-room(%session, $invite.room-id);
-        say "JOINING $invite.room-id, invited by $invite.invitee";
-        send-txt-msg(%session, $invite.room-id, "Thx {$invite.invitee}");
+        join-room($invite.room-id);
+        send-txt-msg($invite.room-id, "Thx {$invite.invitee}");
       }
     }
 }
 
-sub join-room(%session, $room) {
+our sub change-name($name) {
+  my $user-id = %session<username>;
+  my $domain = %session<address>;
+  my $token = %session<token>;
+  my $res = jput("https://$domain/_matrix/client/r0/profile/$user-id/displayname?access_token=$token",
+                 to-json({displayName => $name}));
+  %session<display-name> = $name;
+}
+
+our sub join-room($room) {
   my $domain = %session<address>;
   my $token = %session<token>;
   my %response := jpost("https://$domain/_matrix/client/r0/rooms/$room/join?access_token=$token",
                   to-json({}));
 }
 
-sub send-msg(%session, $room, %msg) {
+our sub send-msg($room, %msg) {
     my $domain = %session<address>;
     my $token = %session<token>;
     my $mid = $id-cnt++;
@@ -184,40 +196,31 @@ sub send-msg(%session, $room, %msg) {
     my %response := jput($url, to-json(%msg));
 }
 
-sub send-txt-msg(%session, $room, $text) is export {
+our sub send-txt-msg($room, $text) is export {
   my %msg := {
         msgtype => "m.text",
         body => $text,
   };
-  send-msg(%session, $room, %msg)
+  send-msg($room, %msg)
 }
 
 sub init-matrix() is export {
-  $server-supply.tap( -> $server {
-    login($server)
-  });
-  $session-supply.tap( -> %session {
-    %session<sync-schedule> = Supply.interval(1).tap({
-      sync(%session);
-    });
+  login(%config<server>);
+
+  %session<sync-schedule> = Supply.interval(1).tap({
+    sync();
   });
 
   $room-event-supply.tap( -> %vars {
-    my %session = %vars<session>;
     my $room = %vars<room>;
     my %event = %vars<event>;
     if %event<type> ~~ "m.room.message" {
       $msg-supplier.emit({
-        session => %session,
         room => $room,
         msg => %event
       });
     }
   });
-  my @servers := %config<servers>;
-  for @servers {
-    $server-supplier.emit($_);
-  }
 
   return $running-promise;
 }

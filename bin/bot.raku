@@ -3,6 +3,7 @@
 use lib 'lib';
 use Matrix;
 use Config;
+use Commands;
 
 use Log::Async;
 logger.send-to("./da5id.log");
@@ -20,13 +21,16 @@ sub MAIN() {
   # });
   Matrix::<$msg-supply>.tap( -> %event {
     say %event;
-    my %session = %event<session>;
     my $room = %event<room>;
     my %msg = %event<msg>;
     my $sender = %msg<sender>;
-    if %msg<content><body>.starts-with(%session<cmd-str>) {
+    say "SESSION IS ", %Matrix::session;
+    if %msg<content><body>.starts-with(%Matrix::session<cmd-str>) {
       info "Sending message $room | $sender";
-      send-txt-msg(%session, $room, "$sender: Get fucked");
+      send-txt-msg($room, "$sender: Get fucked");
+    } elsif %msg<content><body>.starts-with(%Matrix::session<display-name>) {
+      info "Someone pinged us";
+      send-txt-msg($room, "$sender: I haer yuo bro");
     }
   });
 
