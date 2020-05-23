@@ -1,0 +1,9 @@
+---
+servers:
+  -
+    password: password
+    address: my-homeserver.net
+    username: username
+    deviceid: DEVICEID
+    cmd-str: "`"
+...
